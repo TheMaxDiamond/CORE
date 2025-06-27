@@ -12,6 +12,26 @@ const SCOREBOARD_MATERIAL_GEN10 = "../ui/menu/generation_icons/generation_9"
 
 const SCOREBOARD_BACKGROUND = "../ui/menu/scoreboard/scoreboard"
 
+function IsBot( player )
+{
+	if ( player == null )
+		return false
+	
+	// Check if player is marked as a bot
+	if ( "is_bot" in player.kv && player.kv.is_bot == true )
+		return true
+	
+	// Alternative check using player settings
+	try
+	{
+		return player.GetPlayerSettingBool( "is_bot" )
+	}
+	catch ( exception )
+	{
+		return false
+	}
+}
+
 function main()
 {
 	PrecacheHUDMaterial( SCOREBOARD_MATERIAL_FRIENDLY_PLAYER_EVEN )
@@ -708,6 +728,10 @@ function ShowScoreboard()
 				local name = player.GetPlayerName()
 				if ( player.HasBadReputation() )
 					name = "* " + name
+
+				// Add [BOT] tag for bot players
+				if ( IsBot( player ) )
+					name = "[BOT] " + name
 
 				elemTable.name.SetText( name )
 

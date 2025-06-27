@@ -75,6 +75,8 @@ function main()
 	AddClientCommandCallback( "PrivateMatchSetMode", ClientCommand_PrivateMatchSetMode )
 	AddClientCommandCallback( "PrivateMatchLaunch", ClientCommand_PrivateMatchLaunch )
 	AddClientCommandCallback( "PrivateMatchSwitchTeams", ClientCommand_PrivateMatchSwitchTeams )
+	AddClientCommandCallback( "AddBot", ClientCommand_AddBot )
+	AddClientCommandCallback( "RemoveBot", ClientCommand_RemoveBot )
 	AddClientCommandCallback( "CancelMatchSearch", ClientCommand_CancelMatchSearch ) //
 	AddClientCommandCallback( "GenUp", ClientCommand_GenUp ) //
 	AddClientCommandCallback( "RegenMenuViewed", ClientCommand_RegenMenuViewed ) //
@@ -1914,6 +1916,676 @@ function ClientCommand_PrivateMatchSwitchTeams( player, ... )
     player.TrueTeamSwitch()
     UpdatePrivateMatchReadyStatus( true )
     return true
+}
+
+function GetBotCount()
+{
+	local botCount = 0
+	local players = GetPlayerArray()
+	
+	foreach ( player in players )
+	{
+		if ( IsBot( player ) )
+			botCount++
+	}
+	
+	return botCount
+}
+
+function GetRandomPilotClass()
+{
+	// Available pilot classes
+	local pilotClasses = [
+		"pilot_assault",
+		"pilot_cqb",
+		"pilot_grapple", 
+		"pilot_stim",
+		"pilot_cloak"
+	]
+	
+	local randomIndex = RandomInt( pilotClasses.len() )
+	return pilotClasses[randomIndex]
+}
+
+function CreateBotPlayer( botName )
+{
+	// Use C++ engine function to create a fake client (bot)
+	local botEntity = null
+	
+	try
+	{
+		// Create fake client through C++ bridge function
+		botEntity = CreateFakeClient( botName )
+		
+		if ( botEntity != null && botEntity != 0 )
+		{
+			// Get the player object from the entity
+			local bot = GetPlayerByIndex( botEntity )
+			
+			if ( bot != null )
+			{
+				// Mark as bot for identification
+				bot.kv.is_bot <- true
+				bot.s.isBot <- true
+				
+				// Initialize bot-specific properties
+				InitializeBotPlayer( bot )
+				
+				return bot
+			}
+		}
+	}
+	catch ( exception )
+	{
+		printt( "Exception creating bot:", exception )
+		return null
+	}
+	
+	printt( "Failed to create bot:", botName )
+	return null
+}
+
+function InitializeBotPlayer( bot )
+{
+	// Set bot-specific player settings
+	bot.kv.bot_skill_level <- 1 // Default skill level
+	bot.kv.bot_behavior_type <- "assault" // Default behavior
+	bot.s.isBot <- true
+	
+	// Add bot spawn callback
+	AddCallback_OnPlayerRespawned( OnBotPlayerRespawned )
+	
+	// Set default pilot settings
+	local pilotClass = GetRandomPilotClass()
+	bot.SetPlayerPilotSettings( pilotClass )
+	
+	printt( "Initialized bot player:", bot.GetPlayerName() )
+}
+
+function OnBotPlayerRespawned( player )
+{
+	if ( !IsBot( player ) )
+		return
+	
+	// Initialize bot AI behavior after spawn
+	thread InitializeBotAI( player )
+}
+
+function InitializeBotAI( bot )
+{
+	// Wait for bot to fully spawn
+	WaitFrame()
+	
+	if ( !IsValid( bot ) )
+		return
+	
+	// Set up basic bot AI
+	bot.kv.bot_initialized <- true
+	
+	// Start bot behavior thread
+	thread BotBehaviorThread( bot )
+	
+	printt( "Bot AI initialized for:", bot.GetPlayerName() )
+}
+
+function BotBehaviorThread( bot )
+{
+	bot.EndSignal( "OnDestroy" )
+	bot.EndSignal( "OnDisconnected" )
+	
+	while ( IsValid( bot ) && IsBot( bot ) )
+	{
+		// Basic bot behavior - move toward objectives/enemies
+		if ( bot.IsAlive() )
+		{
+			BotUpdateBehavior( bot )
+		}
+		
+		wait 0.1 // Update bot behavior every 100ms
+	}
+}
+
+function BotUpdateBehavior( bot )
+{
+	if ( !IsValid( bot ) || !bot.IsAlive() )
+		return
+	
+	// Use existing AI systems for bot behavior
+	switch ( bot.kv.bot_behavior_type )
+	{
+		case "assault":
+			BotAssaultBehavior( bot )
+			break
+		case "sniper":
+			BotSniperBehavior( bot )
+			break
+		case "support":
+			BotSupportBehavior( bot )
+			break
+		default:
+			BotAssaultBehavior( bot )
+			break
+	}
+}
+
+function BotAssaultBehavior( bot )
+{
+	// Use soldier AI patterns for aggressive play
+	local enemies = GetLivingPlayers( GetEnemyTeam( bot.GetTeam() ) )
+	
+	if ( enemies.len() > 0 )
+	{
+		// Find closest enemy for targeting
+		local closestEnemy = null
+		local closestDistance = 999999
+		
+		foreach ( enemy in enemies )
+		{
+			if ( !IsBot( enemy ) ) // Prioritize human players
+			{
+				local distance = Distance( bot.GetOrigin(), enemy.GetOrigin() )
+				if ( distance < closestDistance )
+				{
+					closestDistance = distance
+					closestEnemy = enemy
+				}
+			}
+		}
+		
+		// Use existing assault point system for movement
+		if ( closestEnemy != null )
+		{
+			BotMoveTowardTarget( bot, closestEnemy )
+		}
+	}
+	else
+	{
+		// No enemies - patrol or move to objectives
+		BotPatrolBehavior( bot )
+	}
+}
+
+function BotSniperBehavior( bot )
+{
+	// Use spectre sniper AI patterns for long-range combat
+	local enemies = GetLivingPlayers( GetEnemyTeam( bot.GetTeam() ) )
+	
+	if ( enemies.len() > 0 )
+	{
+		// Find vantage point using existing AI logic
+		BotFindSniperPosition( bot )
+		
+		// Target acquisition with prioritization
+		local target = BotSelectSniperTarget( bot, enemies )
+		if ( target != null )
+		{
+			BotEngageTarget( bot, target )
+		}
+	}
+}
+
+function BotSupportBehavior( bot )
+{
+	// Follow and support human teammates
+	local teammates = GetLivingPlayers( bot.GetTeam() )
+	local humanTeammates = []
+	
+	foreach ( teammate in teammates )
+	{
+		if ( !IsBot( teammate ) && teammate != bot )
+			humanTeammates.append( teammate )
+	}
+	
+	if ( humanTeammates.len() > 0 )
+	{
+		// Follow closest human teammate
+		local closestTeammate = humanTeammates[0]
+		local closestDistance = Distance( bot.GetOrigin(), closestTeammate.GetOrigin() )
+		
+		foreach ( teammate in humanTeammates )
+		{
+			local distance = Distance( bot.GetOrigin(), teammate.GetOrigin() )
+			if ( distance < closestDistance )
+			{
+				closestDistance = distance
+				closestTeammate = teammate
+			}
+		}
+		
+		BotFollowPlayer( bot, closestTeammate )
+	}
+	else
+	{
+		// No human teammates - default to assault behavior  
+		BotAssaultBehavior( bot )
+	}
+}
+
+function BotMoveTowardTarget( bot, target )
+{
+	if ( !IsValid( bot ) || !IsValid( target ) )
+		return
+	
+	// Use existing assault point system for tactical movement
+	local targetPos = target.GetOrigin()
+	local botPos = bot.GetOrigin()
+	
+	// Calculate movement direction with some tactical spacing
+	local direction = Normalize( targetPos - botPos )
+	local distance = Distance( botPos, targetPos )
+	
+	// Don't get too close - maintain engagement distance
+	local optimalDistance = 300
+	local moveDistance = min( distance - optimalDistance, 200 )
+	
+	if ( moveDistance > 0 )
+	{
+		local movePos = botPos + (direction * moveDistance)
+		
+		// Use existing AI movement functions
+		try
+		{
+			bot.AI_SetAssaultPoint( movePos )
+		}
+		catch ( exception )
+		{
+			// Fallback to basic movement if AI functions not available
+			bot.SetOrigin( movePos )
+		}
+	}
+}
+
+function BotPatrolBehavior( bot )
+{
+	if ( !IsValid( bot ) )
+		return
+	
+	// Move to random position around current location
+	local botPos = bot.GetOrigin()
+	local patrolRadius = 500
+	
+	// Generate random patrol point
+	local randomAngle = RandomFloat( 0, 2 * PI )
+	local randomDistance = RandomFloat( 100, patrolRadius )
+	
+	local patrolPos = botPos + Vector(
+		cos( randomAngle ) * randomDistance,
+		sin( randomAngle ) * randomDistance,
+		0
+	)
+	
+	// Move to patrol position
+	try
+	{
+		bot.AI_SetAssaultPoint( patrolPos )
+	}
+	catch ( exception )
+	{
+		// Fallback movement
+		bot.SetOrigin( patrolPos )
+	}
+}
+
+function BotFindSniperPosition( bot )
+{
+	if ( !IsValid( bot ) )
+		return
+	
+	// Find elevated position for sniping
+	local botPos = bot.GetOrigin()
+	local searchRadius = 800
+	
+	// Look for higher ground in random direction
+	local randomAngle = RandomFloat( 0, 2 * PI )
+	local sniperPos = botPos + Vector(
+		cos( randomAngle ) * searchRadius,
+		sin( randomAngle ) * searchRadius,
+		100 // Try to find higher ground
+	)
+	
+	try
+	{
+		bot.AI_SetAssaultPoint( sniperPos )
+	}
+	catch ( exception )
+	{
+		bot.SetOrigin( sniperPos )
+	}
+}
+
+function BotSelectSniperTarget( bot, enemies )
+{
+	if ( !IsValid( bot ) || enemies.len() == 0 )
+		return null
+	
+	// Target prioritization for sniper bots
+	local bestTarget = null
+	local furthestDistance = 0
+	
+	// Snipers prefer distant targets
+	foreach ( enemy in enemies )
+	{
+		if ( !IsValid( enemy ) )
+			continue
+			
+		local distance = Distance( bot.GetOrigin(), enemy.GetOrigin() )
+		
+		// Prioritize human players and distant targets
+		local priority = distance
+		if ( !IsBot( enemy ) )
+			priority += 1000 // Bonus for human players
+		
+		if ( priority > furthestDistance )
+		{
+			furthestDistance = priority
+			bestTarget = enemy
+		}
+	}
+	
+	return bestTarget
+}
+
+function BotEngageTarget( bot, target )
+{
+	if ( !IsValid( bot ) || !IsValid( target ) )
+		return
+	
+	// Face the target
+	local botPos = bot.GetOrigin()
+	local targetPos = target.GetOrigin()
+	local direction = Normalize( targetPos - botPos )
+	
+	// Set aim direction
+	local angles = VectorToAngles( direction )
+	bot.SetAngles( angles )
+	
+	// Simulate weapon firing
+	try
+	{
+		// Use existing weapon systems if available
+		local weapon = bot.GetActiveWeapon()
+		if ( IsValid( weapon ) )
+		{
+			bot.PressAttack()
+			
+			// Release attack after short duration
+			thread function() : ( bot )
+			{
+				wait 0.1
+				if ( IsValid( bot ) )
+					bot.ReleaseAttack()
+			}()
+		}
+	}
+	catch ( exception )
+	{
+		// Basic engagement fallback
+		printt( "Bot", bot.GetPlayerName(), "engaging", target.GetPlayerName() )
+	}
+}
+
+function BotFollowPlayer( bot, player )
+{
+	// Follow behavior similar to titan AI follow mode
+	local playerPos = player.GetOrigin()
+	local botPos = bot.GetOrigin()
+	local distance = Distance( botPos, playerPos )
+	
+	// Maintain optimal follow distance
+	if ( distance > 400 ) // Too far - move closer
+	{
+		BotMoveTowardTarget( bot, player )
+	}
+	else if ( distance < 150 ) // Too close - back off slightly
+	{
+		local direction = Normalize( botPos - playerPos )
+		local movePos = playerPos + (direction * 200)
+		bot.AI_SetAssaultPoint( movePos )
+	}
+}
+
+function SyncBotStateWithClients( bot )
+{
+	if ( !IsValid( bot ) )
+		return
+	
+	// Ensure bot appears in player lists and scoreboards
+	local players = GetPlayerArray()
+	
+	foreach ( player in players )
+	{
+		if ( !IsBot( player ) )
+		{
+			// Send bot information to each human client
+			ClientCommand( player, "UpdateBotInfo", bot.GetPlayerName(), bot.GetTeam(), "bot" )
+		}
+	}
+	
+	// Update lobby UI to show the new bot
+	UpdateLobbyPlayerLists()
+}
+
+function UpdateLobbyPlayerLists()
+{
+	// Trigger UI updates for all connected clients
+	local players = GetPlayerArray()
+	
+	foreach ( player in players )
+	{
+		if ( !IsBot( player ) )
+		{
+			// Force lobby UI refresh for each human player
+			Remote_CallFunction_UI( player, "UpdateLobbyPlayerList" )
+		}
+	}
+}
+
+function GetBotInfoForUI( bot )
+{
+	if ( !IsValid( bot ) || !IsBot( bot ) )
+		return null
+	
+	local botInfo = {
+		name = bot.GetPlayerName(),
+		team = bot.GetTeam(),
+		isBot = true,
+		skillLevel = bot.kv.bot_skill_level,
+		behaviorType = bot.kv.bot_behavior_type
+	}
+	
+	return botInfo
+}
+
+function RemoveBotFromGame( bot )
+{
+	if ( !IsValid( bot ) || !IsBot( bot ) )
+		return false
+	
+	printt( "Removing bot:", bot.GetPlayerName() )
+	
+	// Notify all clients that bot is being removed
+	local players = GetPlayerArray()
+	foreach ( player in players )
+	{
+		if ( !IsBot( player ) )
+		{
+			ClientCommand( player, "RemoveBotInfo", bot.GetPlayerName() )
+		}
+	}
+	
+	// Get bot entity handle and disconnect through C++
+	local botEntity = bot.GetEntityIndex()
+	if ( botEntity && IsValidBot( botEntity ) )
+	{
+		DisconnectBot( botEntity )
+	}
+	else
+	{
+		// Fallback to Squirrel disconnect if C++ method fails
+		bot.Disconnect()
+	}
+	
+	// Update lobby UI
+	UpdateLobbyPlayerLists()
+	UpdatePrivateMatchReadyStatus( true )
+	
+	return true
+}
+
+function CleanupAllBots()
+{
+	// Clean up all bots when leaving private match
+	local players = GetPlayerArray()
+	local botsToRemove = []
+	
+	foreach ( player in players )
+	{
+		if ( IsBot( player ) )
+			botsToRemove.append( player )
+	}
+	
+	foreach ( bot in botsToRemove )
+	{
+		RemoveBotFromGame( bot )
+	}
+	
+	printt( "Cleaned up", botsToRemove.len(), "bots" )
+}
+
+function IsBot( player )
+{
+	if ( player == null )
+		return false
+	
+	// Check if player is marked as a bot
+	if ( "is_bot" in player.kv && player.kv.is_bot == true )
+		return true
+	
+	// Alternative check using player settings
+	try
+	{
+		return player.GetPlayerSettingBool( "is_bot" )
+	}
+	catch ( exception )
+	{
+		return false
+	}
+}
+
+function ClientCommand_AddBot( player, ... )
+{
+	if ( !IsPrivateMatch() )
+		return false
+	if ( GetLobbyType() != "game" )
+		return false
+	if ( GetMapName() != "mp_lobby")
+		return false
+	
+	if ( GetPartyLeader( player ) != player )
+	{
+		printt( "Player", player.GetPlayerName(), "tried to 'AddBot', but is a party follower." )
+		return false
+	}
+	
+	if ( level.ui.privatematch_starting == ePrivateMatchStartState.STARTING )
+		return false
+	
+	// Check current player counts and bot limits
+	local players = GetPlayerArray()
+	local totalPlayerCount = players.len()
+	local botCount = GetBotCount()
+	local maxPlayers = GetCurrentPlaylistVarInt( "max_players", 12 )
+	local maxBots = 8 // Limit bots to 8 per server
+	
+	if ( totalPlayerCount >= maxPlayers )
+	{
+		printt( "Cannot add bot: Server is full (", totalPlayerCount, "/", maxPlayers, ")" )
+		return false
+	}
+	
+	if ( botCount >= maxBots )
+	{
+		printt( "Cannot add bot: Bot limit reached (", botCount, "/", maxBots, ")" )
+		return false
+	}
+	
+	// Create a bot player entity
+	local botName = "Bot " + (GetBotCount() + 1)
+	local bot = CreateBotPlayer( botName )
+	
+	if ( bot == null )
+	{
+		printt( "Failed to create bot player" )
+		return false
+	}
+	
+	// Assign bot to a team (balance teams if auto-balance is enabled)
+	local teamToJoin = TEAM_MILITIA
+	if ( GetConVarBool( "delta_autoBalanceTeams" ) )
+	{
+		local imcCount = GetTeamPlayerCount( TEAM_IMC )
+		local militiaCount = GetTeamPlayerCount( TEAM_MILITIA )
+		
+		if ( imcCount < militiaCount )
+			teamToJoin = TEAM_IMC
+	}
+	
+	bot.SetTeam( teamToJoin )
+	
+	// Synchronize bot state with all clients
+	SyncBotStateWithClients( bot )
+	
+	printt( player.GetPlayerName(), "added bot:", botName, "to team", teamToJoin )
+	
+	UpdatePrivateMatchReadyStatus( true )
+	return true
+}
+
+function ClientCommand_RemoveBot( player, ... )
+{
+	if ( !IsPrivateMatch() )
+		return false
+	if ( GetLobbyType() != "game" )
+		return false
+	if ( GetMapName() != "mp_lobby")
+		return false
+	
+	if ( GetPartyLeader( player ) != player )
+	{
+		printt( "Player", player.GetPlayerName(), "tried to 'RemoveBot', but is a party follower." )
+		return false
+	}
+	
+	if ( level.ui.privatematch_starting == ePrivateMatchStartState.STARTING )
+		return false
+	
+	// Find a bot to remove
+	local players = GetPlayerArray()
+	local botToRemove = null
+	
+	foreach ( p in players )
+	{
+		if ( IsBot( p ) )
+		{
+			botToRemove = p
+			break
+		}
+	}
+	
+	if ( botToRemove == null )
+	{
+		printt( "No bots found to remove" )
+		return false
+	}
+	
+	// Remove the bot
+	if ( RemoveBotFromGame( botToRemove ) )
+	{
+		printt( player.GetPlayerName(), "removed bot:", botToRemove.GetPlayerName() )
+		return true
+	}
+	
+	return false
 }
 
 function ClientCommand_CancelMatchSearch( player, ... )

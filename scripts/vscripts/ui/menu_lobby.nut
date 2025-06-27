@@ -82,6 +82,9 @@ function main()
 	Globalize( LocalDialogChoice_RestartTraining )
 	Globalize( LocalDialogChoice_TrainPilotOnly )
 	Globalize( LocalDialogChoice_TrainTitanOnly )
+	Globalize( OnAddBotButton_Activate )
+	Globalize( OnRemoveBotButton_Activate )
+	Globalize( UICodeCallback_SetupPlayerListNameElements )
 }
 
 function InitLobbyMenu( menu )
@@ -100,6 +103,8 @@ function InitLobbyMenu( menu )
 	AddEventHandlerToButton( menu, "MapsButton", UIE_CLICK, OnMapsButton_Activate )
 	AddEventHandlerToButton( menu, "ModesButton", UIE_CLICK, OnModesButton_Activate )
 	AddEventHandlerToButton( menu, "SettingsButton", UIE_CLICK, OnSettingsButton_Activate )
+	AddEventHandlerToButton( menu, "AddBotButton", UIE_CLICK, OnAddBotButton_Activate )
+	AddEventHandlerToButton( menu, "RemoveBotButton", UIE_CLICK, OnRemoveBotButton_Activate )
 
 	AddEventHandlerToButton( menu, "BtnEditPilotLoadouts", UIE_CLICK, EditPilotLoadoutList_Activate )
 	AddEventHandlerToButtonClass( menu, "EditPilotLoadoutsButtonClass", UIE_GET_FOCUS, LockedButtonGetFocusHandler )
@@ -2036,6 +2041,28 @@ function OnStartMatchButton_Activate( button )
 	ClientCommand( "PrivateMatchLaunch" )
 }
 
+function OnAddBotButton_Activate( button )
+{
+	if ( !IsPrivateMatch() )
+		return
+	
+	if ( level.ui.privatematch_starting == ePrivateMatchStartState.STARTING )
+		return
+	
+	ClientCommand( "AddBot" )
+}
+
+function OnRemoveBotButton_Activate( button )
+{
+	if ( !IsPrivateMatch() )
+		return
+	
+	if ( level.ui.privatematch_starting == ePrivateMatchStartState.STARTING )
+		return
+	
+	ClientCommand( "RemoveBot" )
+}
+
 function OnStartMatchButton_GetFocus( button )
 {
 	local menu = GetMenu( "LobbyMenu" )
@@ -2156,6 +2183,42 @@ function UICodeCallback_SetupPlayerListGenElements( params, gen, rank, isPlaying
 	local rankImage = GetRankImage( rank )
 	params.image = rankImage
 	params.imageOverlay = ""
+}
+
+function IsBot( player )
+{
+	if ( player == null )
+		return false
+	
+	// Check if player is marked as a bot
+	if ( "is_bot" in player.kv && player.kv.is_bot == true )
+		return true
+	
+	// Alternative check using player settings
+	try
+	{
+		return player.GetPlayerSettingBool( "is_bot" )
+	}
+	catch ( exception )
+	{
+		return false
+	}
+}
+
+function UICodeCallback_SetupPlayerListNameElements( params )
+{
+	local player = GetPlayerByIndex( params.index )
+	if ( player == null )
+		return true
+		
+	local name = player.GetPlayerName()
+	
+	// Add [BOT] tag for bot players
+	if ( IsBot( player ) )
+		name = "[BOT] " + name
+	
+	params.name = name
+	return true
 }
 
 function OnClickGameSummaryButton( button )
