@@ -1949,36 +1949,69 @@ function GetRandomPilotClass()
 
 function CreateBotPlayer( botName )
 {
-	// Use C++ engine function to create a fake client (bot)
-	local botEntity = null
+	// Use simple approach - execute the existing console command
+	local teamToJoin = 3 // Default to Militia (team 3)
 	
+	// Try C++ function first
+	local botEntity = null
 	try
 	{
-		// Create fake client through C++ bridge function
 		botEntity = CreateFakeClient( botName )
-		
 		if ( botEntity != null && botEntity != 0 )
 		{
-			// Get the player object from the entity
 			local bot = GetPlayerByIndex( botEntity )
-			
 			if ( bot != null )
 			{
-				// Mark as bot for identification
 				bot.kv.is_bot <- true
 				bot.s.isBot <- true
-				
-				// Initialize bot-specific properties
 				InitializeBotPlayer( bot )
-				
 				return bot
 			}
 		}
 	}
 	catch ( exception )
 	{
-		printt( "Exception creating bot:", exception )
-		return null
+		printt( "C++ bot creation failed:", exception )
+	}
+	
+	// Fallback: Try using existing console command
+	try
+	{
+		local prePlayerCount = GetPlayerArray().len()
+		
+		// Execute the existing bot_dummy command
+		SendConsoleCommand( "bot_dummy -team " + teamToJoin )
+		
+		// Wait a frame for the bot to be created
+		WaitFrame()
+		
+		// Find the new bot by comparing player counts
+		local postPlayers = GetPlayerArray()
+		if ( postPlayers.len() > prePlayerCount )
+		{
+			// Find the newest player (likely the bot)
+			local newestBot = null
+			foreach ( player in postPlayers )
+			{
+				if ( player.GetPlayerName().find("Bot") != null )
+				{
+					newestBot = player
+					break
+				}
+			}
+			
+			if ( newestBot != null )
+			{
+				newestBot.kv.is_bot <- true
+				newestBot.s.isBot <- true
+				InitializeBotPlayer( newestBot )
+				return newestBot
+			}
+		}
+	}
+	catch ( exception )
+	{
+		printt( "Console bot creation failed:", exception )
 	}
 	
 	printt( "Failed to create bot:", botName )
